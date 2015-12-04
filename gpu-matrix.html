@@ -69,6 +69,7 @@
 				</div>
 			</div>
 		</div>
+		<canvas id="matrixglcanvas" width="128" height="128"></canvas>
 		<script>
 			var xhr,
 			 	matrix,
@@ -83,7 +84,8 @@
 
 			$(".results").on('click', function(e){
 					$(".results").toggleClass("preformatted");
-			})
+			});
+
 		  function randomArray(N, M){
 
 		    var data = [];
@@ -160,13 +162,7 @@
 		  var data = randomArray(N, M);
 
 
-			xhr = new XMLHttpRequest();
 
-			// download data
-			xhr.open('GET', './data/csv/hours/items.json', true);
-			// replace with ArrayBuffer?
-			// hr.responseType = 'arraybuffer';
-			// http://www.html5rocks.com/en/tutorials/file/xhr2/
 
 			/* Web Workers
 				https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
@@ -181,87 +177,23 @@
 			var rep;
 			var g_m;
 
+			/*
+			xhr = new XMLHttpRequest();
+
+			// replace with ArrayBuffer?
+			// hr.responseType = 'arraybuffer';
+			// http://www.html5rocks.com/en/tutorials/file/xhr2/
+			// download data
+
+			xhr.open('GET', './data/csv/hours/items.json', true);
+
 			xhr.onload = function(e){
 				if(this.status == 200){
 
 					var json,
 						t0, t1;
 
-					json = JSON.parse(this.response)
-
-					rep = fromArray(data, Float32Array);
-					rep_t = fromArray(data, Float32Array, true);
-					var typeString = getContainerString(rep.data);
-					$("#description").html("multiplying "+ rep.shape[0] + " x "+ rep.shape[1] + " matrix (" + typeString + ")");
-
-					/* gpu example from:
-					 		https://github.com/watmough/webgl-matrix-demo
-							code demo of above:
-							http://watmough.github.io/webgl-matrix-demo/
-
-					 */
-
-					t0 = new Date().getTime();
-
-					g_m = gpu_matrix.create(rep.shape[0], rep.shape[1], rep.data);
-					var g_m2 = gpu_matrix.create(rep_t.shape[0], rep_t.shape[1], rep_t.data);
-
-
-					var result = g_m.multiply(g_m2);
-
-					t1 = new Date().getTime();
-
-					elapsed.push((t1 - t0) / 1000);
-					$("#gpu .results").append(result.data.slice(0, 15).join(',\n'));
-					$("#gpu .time").append(elapsed[elapsed.length - 1] + " seconds");
-
-					setTimeout(function(){
-						// vectorious
-						matrix = new vectorious.Matrix(rep.data, {"shape" : rep.shape});
-
-						mT = matrix.transpose();
-
-						t0 = new Date().getTime();
-						dots = matrix.multiply(mT);
-
-						t1 = new Date().getTime();
-
-
-						elapsed.push((t1 - t0) / 1000);
-						//$("#vec .results").removeClass("hexdots-loader");
-						$("#vec .results").html(dots.data.slice(0, 15).join(',\n'));
-						$("#vec .time").append(elapsed[elapsed.length - 1] + " seconds");
-
-
-						var relative_error = allclose(result.data, dots.data);
-						var result_text;
-						if(relative_error < RTOL){
-							$("#precision").addClass("alert-success");
-						}
-						else {
-							$("#precision").addClass("alert-danger");
-						}
-
-						$("#precision").removeClass("alert-info");
-						$("#precision").html(Math.floor(Math.log10(1/relative_error)) + " digits of precision");
-
-						var speedup = elapsed[1] / elapsed[0];
-						if(speedup > 1.2){
-								$("#time").addClass("alert-success");
-
-								$("#time").removeClass("alert-info");
-
-						}
-						else if(speedup < 0.8){
-								$("#time").addClass("alert-danger");
-
-								$("#time").removeClass("alert-info");
-						}
-
-
-						$("#time").html( (elapsed[1] / elapsed[0]).toFixed(1) + "x speedup");
-
-					}, 0);
+					json = JSON.parse(this.response);
 
 				} else {
 					results.innerHTML = "Failed";
@@ -269,8 +201,84 @@
 			};
 
 			xhr.send();
+			*/
+
+			rep = fromArray(data, Float32Array);
+			rep_t = fromArray(data, Float32Array, true);
+			var typeString = getContainerString(rep.data);
+			$("#description").html("multiplying "+ rep.shape[0] + " x "+ rep.shape[1] + " matrix (" + typeString + ")");
+
+			/* gpu example from:
+			 		https://github.com/watmough/webgl-matrix-demo
+					code demo of above:
+					http://watmough.github.io/webgl-matrix-demo/
+
+			 */
+
+			t0 = new Date().getTime();
+
+			g_m = gpu_matrix.create(rep.shape[0], rep.shape[1], rep.data);
+			var g_m2 = gpu_matrix.create(rep_t.shape[0], rep_t.shape[1], rep_t.data);
+
+
+			var result = g_m.multiply(g_m2);
+
+			t1 = new Date().getTime();
+
+			elapsed.push((t1 - t0) / 1000);
+			$("#gpu .results").append(result.data.slice(0, 15).join(',\n'));
+			$("#gpu .time").append(elapsed[elapsed.length - 1] + " seconds");
+
+			setTimeout(function(){
+				// vectorious
+				matrix = new vectorious.Matrix(rep.data, {"shape" : rep.shape});
+
+				mT = matrix.transpose();
+
+				t0 = new Date().getTime();
+				dots = matrix.multiply(mT);
+
+				t1 = new Date().getTime();
+
+
+				elapsed.push((t1 - t0) / 1000);
+				//$("#vec .results").removeClass("hexdots-loader");
+				$("#vec .results").html(dots.data.slice(0, 15).join(',\n'));
+				$("#vec .time").append(elapsed[elapsed.length - 1] + " seconds");
+
+
+				var relative_error = allclose(result.data, dots.data);
+				var result_text;
+				if(relative_error < RTOL){
+					$("#precision").addClass("alert-success");
+				}
+				else {
+					$("#precision").addClass("alert-danger");
+				}
+
+				$("#precision").removeClass("alert-info");
+				$("#precision").html(Math.floor(Math.log10(1/relative_error)) + " digits of precision");
+
+				var speedup = elapsed[1] / elapsed[0];
+				if(speedup > 1.2){
+						$("#time").addClass("alert-success");
+
+						$("#time").removeClass("alert-info");
+
+				}
+				else if(speedup < 0.8){
+						$("#time").addClass("alert-danger");
+
+						$("#time").removeClass("alert-info");
+				}
+
+
+				$("#time").html( (elapsed[1] / elapsed[0]).toFixed(1) + "x speedup");
+
+			}, 0);
+
+
 
 		</script>
-		<canvas id="matrixglcanvas" width="128" height="128"></canvas>
 	</body>
 </html>
