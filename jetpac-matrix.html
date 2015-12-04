@@ -15,13 +15,6 @@
   <script type="text/javascript" src="DeepBeliefSDK/JavascriptLibrary/Utils/glMatrix.js"></script>
   <script type="text/javascript" src="DeepBeliefSDK/JavascriptLibrary/Utils/webgl.js"></script>
   <script type="text/javascript" src="DeepBeliefSDK/JavascriptLibrary/jpcnn.js"></script>
-
-		<!--
-		<script src="underscore.js"></script>
-		<script src="DeepBeliefSDK/JavascriptLibrary/Utils/glMatrix.js"></script>
-		<script src="DeepBeliefSDK/JavascriptLibrary/Utils/webgl.js"></script>
-    <script src="DeepBeliefSDK/JavascriptLibrary/jpcnn.js"></script>
-	-->
 		<style>
 			.results{
 				height: 45px;
@@ -45,6 +38,9 @@
 			}
 			#allclose {
 			}
+			#run{
+				float: right;
+			}
 
 		</style>
 	</head>
@@ -64,6 +60,7 @@
 				<h3>Results</h3>
 				<div id="precision" class="alert alert-info">...</div>
 				<div id="time" class="alert alert-info">...</div>
+				<div id="run" class="btn btn-default">Run Benchmark <span class="glyphicon glyphicon-refresh"></span></div>
 			</div>
 		</div>
 		<div class="container">
@@ -84,6 +81,7 @@
 				</div>
 			</div>
 		</div>
+		<canvas id="matrixglcanvas" width="128" height="128"></canvas>
 		<script>
 			var xhr,
 			 	matrix,
@@ -91,28 +89,56 @@
 				dots;
 
 			var RTOL=1e-05,
-					ATOL=1e-12; // for 32 bit precision: 1e-06
+				ATOL=1e-12; // for 32 bit precision: 1e-06
 
 			var N = 1024,
-					M = 1024;
+				M = 1024;
 
 			$(".results").on('click', function(e){
 					$(".results").toggleClass("preformatted");
-			})
-		  function randomArray(N, M){
+			});
+			$("#run").on('click', function(e){
+				var $self = $(this);
 
-		    var data = [];
+				$self.addClass(".disabled");
 
-		    for(var i = 0; i < N; i++){
-		      var row = [];
-		      for(var j = 0; j < M; j++){
-		          row[j] = Math.random() / Math.sqrt(N);
-		      }
-		      data.push(row);
-		    }
+				$("#precision").removeClass().addClass("alert alert-info");
+				$("#precision").html("...");
+				$("#time").removeClass().addClass("alert alert-info");
+				$("#time").html("...");
 
-		    return data;
-		  }
+				$("#gpu .results").html("");
+				$("#gpu .time").html("");
+
+				$("#vec .results").html("");
+				$("#vec .time").html("");
+
+				setTimeout(function(){
+					runBenchmark(N, M, function(){
+						$self.removeClass(".disabled");
+					});
+
+				}, 500);
+
+
+			});
+
+			$("#run").click();
+
+			function randomArray(N, M){
+
+				var data = [];
+
+				for(var i = 0; i < N; i++){
+					var row = [];
+					for(var j = 0; j < M; j++){
+						row[j] = Math.random() / Math.sqrt(N);
+					}
+					data.push(row);
+				}
+
+				return data;
+			}
 
 			/* create a typed array from a 2D javascript array */
 			function fromArray(array, type, tranpose) {
@@ -148,6 +174,7 @@
 				var typeString = Object.prototype.toString.call(container);
 			 	return typeString.substring(8, typeString.length - 1);
 			}
+
 			/* from numpy.allclose */
 			function allclose(a, b){
 
@@ -172,16 +199,10 @@
 						return max_relative_error;
 			}
 
-		  var data = randomArray(N, M);
 
+		function runBenchmark(N, M, callback){
 
-			xhr = new XMLHttpRequest();
-
-			// download data
-			xhr.open('GET', './data/csv/hours/items.json', true);
-			// replace with ArrayBuffer?
-			// hr.responseType = 'arraybuffer';
-			// http://www.html5rocks.com/en/tutorials/file/xhr2/
+			var data = randomArray(N, M);
 
 			/* Web Workers
 				https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
@@ -194,8 +215,17 @@
 
 			var elapsed = [];
 			var rep;
-			var aBuffer,
-					cBuffer;
+			var g_m;
+
+			/*
+			xhr = new XMLHttpRequest();
+
+			// replace with ArrayBuffer?
+			// hr.responseType = 'arraybuffer';
+			// http://www.html5rocks.com/en/tutorials/file/xhr2/
+			// download data
+
+			xhr.open('GET', './data/csv/hours/items.json', true);
 
 			xhr.onload = function(e){
 				if(this.status == 200){
@@ -203,115 +233,7 @@
 					var json,
 						t0, t1;
 
-					json = JSON.parse(this.response)
-
-					rep = fromArray(data, Float32Array);
-					rep_t = fromArray(data, Float32Array, true);
-					var typeString = getContainerString(rep.data);
-					$("#description").html("multiplying "+ rep.shape[0] + " x "+ rep.shape[1] + " matrix (" + typeString + ")");
-
-					/* gpu example from:
-					 		https://github.com/watmough/webgl-matrix-demo
-							code demo of above:
-							http://watmough.github.io/webgl-matrix-demo/
-
-					 */
-
-					t0 = new Date().getTime();
-
-					var m = rep.shape[0]; //outputChannels;
-				  var n = rep_t.shape[0]; //inputDims._dims[0];
-				  var k = rep.shape[1]; //inputDims._dims[1];
-				  var alpha = 1.0;
-				  var lda = m;
-				  var ldb = k;
-				  var ldc = m;
-				  var beta = 0.0;
-
-					aBuffer = new Buffer([k, m], rep.data);
-					var bBuffer = new Buffer([n, k], rep_t.data);
-					cBuffer = new Buffer([n, m]);
-
-					cBuffer.setName('gpu_result');
-
-					// TODO: CHANGE THIS
-					/*
-					g_m = gpu_matrix.create(rep.shape[0], rep.shape[1], rep.data);
-					var g_m2 = gpu_matrix.create(rep_t.shape[0], rep_t.shape[1], rep_t.data);
-
-					var result = g_m.multiply(g_m2);
-					*/
-
-					g_gpuCalculator = new GPUCalculator({"canvas" : document.getElementById("matrixglcanvas")});
-					var result = glGemm(
-								 m,
-								 n,
-								 k,
-								 alpha,
-								 aBuffer,
-								 lda,
-								 bBuffer,
-								 ldb,
-								 beta,
-								 cBuffer,
-								 ldc
-							 );
-
-
-
-					t1 = new Date().getTime();
-
-					elapsed.push((t1 - t0) / 1000);
-					$("#gpu .results").append(result._data.slice(0, 15).join(',\n'));
-					$("#gpu .time").append(elapsed[elapsed.length - 1] + " seconds");
-
-					setTimeout(function(){
-						// vectorious
-						matrix = new vectorious.Matrix(rep.data, {"shape" : rep.shape});
-
-						mT = matrix.transpose();
-
-						t0 = new Date().getTime();
-						dots = matrix.multiply(mT);
-
-						t1 = new Date().getTime();
-
-
-						elapsed.push((t1 - t0) / 1000);
-						//$("#vec .results").removeClass("hexdots-loader");
-						$("#vec .results").html(dots.data.slice(0, 15).join(',\n'));
-						$("#vec .time").append(elapsed[elapsed.length - 1] + " seconds");
-
-
-						var relative_error = allclose(result._data, dots.data);
-						var result_text;
-						if(relative_error < RTOL){
-							$("#precision").addClass("alert-success");
-						}
-						else {
-							$("#precision").addClass("alert-danger");
-						}
-
-						$("#precision").removeClass("alert-info");
-						$("#precision").html(Math.floor(Math.log10(1/relative_error)) + " digits of precision");
-
-						var speedup = elapsed[1] / elapsed[0];
-						if(speedup > 1.2){
-								$("#time").addClass("alert-success");
-
-								$("#time").removeClass("alert-info");
-
-						}
-						else if(speedup < 0.8){
-								$("#time").addClass("alert-danger");
-
-								$("#time").removeClass("alert-info");
-						}
-
-
-						$("#time").html( (elapsed[1] / elapsed[0]).toFixed(1) + "x speedup");
-
-					}, 0);
+					json = JSON.parse(this.response);
 
 				} else {
 					results.innerHTML = "Failed";
@@ -319,8 +241,107 @@
 			};
 
 			xhr.send();
+			*/
+
+			rep = fromArray(data, Float32Array);
+			rep_t = fromArray(data, Float32Array, true);
+			var typeString = getContainerString(rep.data);
+			$("#description").html("multiplying "+ rep.shape[0] + " x "+ rep.shape[1] + " matrix (" + typeString + ")");
+
+
+			var m = rep.shape[0]; //outputChannels;
+			var n = rep_t.shape[0]; //inputDims._dims[0];
+			var k = rep.shape[1]; //inputDims._dims[1];
+			var alpha = 1.0;
+			var lda = m;
+			var ldb = k;
+			var ldc = m;
+			var beta = 0.0;
+
+			aBuffer = new Buffer([k, m], rep.data);
+			var bBuffer = new Buffer([n, k], rep_t.data);
+			cBuffer = new Buffer([n, m]);
+
+			cBuffer.setName('gpu_result');
+
+			t0 = new Date().getTime();
+
+			g_gpuCalculator = new GPUCalculator({"canvas" : document.getElementById("matrixglcanvas")});
+			var result = glGemm(
+						 m,
+						 n,
+						 k,
+						 alpha,
+						 aBuffer,
+						 lda,
+						 bBuffer,
+						 ldb,
+						 beta,
+						 cBuffer,
+						 ldc
+					 );
+
+
+
+			t1 = new Date().getTime();
+
+
+			elapsed.push((t1 - t0) / 1000);
+			$("#gpu .results").html(result._data.subarray(0, 15).join(',\n'));
+			$("#gpu .time").html(elapsed[elapsed.length - 1] + " seconds");
+
+			setTimeout(function(){
+				// vectorious
+				matrix = new vectorious.Matrix(rep.data, {"shape" : rep.shape});
+
+				mT = matrix.transpose();
+
+				t0 = new Date().getTime();
+				dots = matrix.multiply(mT);
+
+				t1 = new Date().getTime();
+
+
+				elapsed.push((t1 - t0) / 1000);
+				//$("#vec .results").removeClass("hexdots-loader");
+				$("#vec .results").html(dots.data.subarray(0, 15).join(',\n'));
+				$("#vec .time").html(elapsed[elapsed.length - 1] + " seconds");
+
+
+				var relative_error = allclose(result._data, dots.data);
+				var result_text;
+				if(relative_error < RTOL){
+					$("#precision").addClass("alert-success");
+				}
+				else {
+					$("#precision").addClass("alert-danger");
+				}
+
+				$("#precision").removeClass("alert-info");
+				$("#precision").html(Math.floor(Math.log10(1/relative_error)) + " digits of precision");
+
+				var speedup = elapsed[1] / elapsed[0];
+				if(speedup > 1.2){
+						$("#time").addClass("alert-success");
+
+						$("#time").removeClass("alert-info");
+
+				}
+				else if(speedup < 0.8){
+						$("#time").addClass("alert-danger");
+
+						$("#time").removeClass("alert-info");
+				}
+
+
+				$("#time").html( (elapsed[1] / elapsed[0]).toFixed(1) + "x speedup");
+
+				callback();
+			}, 0);
+		}
+
+
 
 		</script>
-		<canvas id="matrixglcanvas" width="128" height="128"></canvas>
 	</body>
 </html>
