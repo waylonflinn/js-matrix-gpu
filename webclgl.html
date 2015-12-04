@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>WebCLGL</title>
+		<script src="vectorious-3.0.0.js"></script>
+    <script src="webclgl/WebCLGLUtils.class.js"></script>
+	<script src="webclgl/WebCLGLBuffer.class.js"></script>
+	<script src="webclgl/WebCLGLKernel.class.js"></script>
+	<script src="webclgl/WebCLGL.class.js"></script>
+	</head>
+	<body>
+		<h1>GPU Matrix Development</h1>
+		<div> <h3>simple</h3>
+				<div>time: <span id="cpu_time"></span></div>
+				<div>value: <span id="cpu_results"></span></div>
+		</div>
+		<div> <h3>vectorious</h3>
+				<div>time: <span id="vec_time"></span></div>
+				<div>value: <span id="vec_results"></span></div>
+		</div>
+		<div> <h3>webclgl</h3>
+				<div>time: <span id="gpu_time"></span></div>
+				<div>value: <span id="gpu_results"></span></div>
+		</div>
+		<h3>All Close</h3>
+		<div id="allclose"></div>
+		<script>
+			var xhr,
+			 	matrix,
+				result = [],
+				dots;
+
+		  function randomArray(N, M){
+
+		    var data = [];
+
+		    for(var i = 0; i < N; i++){
+		      var row = [];
+		      for(var j = 0; j < M; j++){
+		          row[j] = Math.random();
+		      }
+		      data.push(row);
+		    }
+
+		    return data;
+		  }
+
+			/* create a typed array from a 2D javascript array */
+			function fromArray(array, type) {
+				var shape = [],
+						data,
+						c;   // number of columns
+
+				shape[0] = array.length;
+				shape[1] = array[0].length;
+				c = shape[1];
+
+				type = type || Float64Array;
+
+				data = new type(shape[0]*shape[1]);
+
+				for (var ii = 0; ii < shape[0]; ++ii)
+					for (var jj = 0; jj < shape[1]; ++jj)
+						data[ii*c + jj] = array[ii][jj];
+
+				return {"data": data, "shape": shape};
+			};
+
+			/* from numpy.allclose */
+			function allclose(a, b){
+				var rtol=1e-05,
+				 		atol=1e-06; // for 32 bit precision: 1e-06
+
+						if(a.length != b.length){
+							console.log("lengths not equal: " + a.length + ", " + b.length);
+							return false;
+						}
+
+						for(var i = 0; i < a.length; i++){
+							if(Math.abs(a[i] - b[i]) > (atol + rtol * Math.abs(b[i]))){
+								console.log(Math.abs(a[i] - b[i]));
+								return false;
+							}
+						}
+						return true;
+			}
+
+		  var N = 2048;
+		  var data = randomArray(N, N);
+
+			document.getElementById("cpu_results").innerHTML = data[0][0] + data[0][0];
+
+			xhr = new XMLHttpRequest();
+
+			// download data
+			xhr.open('GET', './data/csv/hours/items.json', true);
+			// replace with ArrayBuffer?
+			// hr.responseType = 'arraybuffer';
+			// http://www.html5rocks.com/en/tutorials/file/xhr2/
+
+			var c_gpu;
+
+			xhr.onload = function(e){
+				if(this.status == 200){
+
+					var json,
+						t0, t1;
+
+					json = JSON.parse(this.response)
+
+					var rep = fromArray(data, Float32Array);
+
+					// vectorious
+					matrix = new vectorious.Matrix(rep.data, {"shape" : rep.shape});
+
+					mT = matrix.transpose();
+
+					t0 = new Date().getTime();
+					dots = matrix.add(matrix);
+
+					t1 = new Date().getTime();
+
+
+
+					document.getElementById("vec_results").innerHTML = dots.get(0, 0);
+
+					document.getElementById("vec_time").innerHTML = (t1 - t0) / 1000;
+
+					/* References:
+							http://stackoverflow.com/questions/9583426/packing-data-in-webgl-float64-int64arrays-in-chrome
+							http://stackoverflow.com/questions/7410957/using-html5-webgl-shaders-for-computation
+
+						matrixMul kernel from:
+							http://gpgpu-computing4.blogspot.com/2009/09/matrix-multiplication-2-opencl.html
+							based on:
+							http://gpgpu-computing4.blogspot.com/2009/09/matrix-multiplication-1.html
+					 */
+					// webclgl
+
+			    // PERFORM A + B WITH GPU
+			    webCLGL = new WebCLGL();
+
+
+					t0 = new Date().getTime();
+					/*
+			    var kernel_add_source = 'void main(float* A,'+
+			                                      'float* B) {'+
+			                              	'vec2 x = get_global_id();'+ // or get_global_id()+vec2(0.1,0.1)
+			                                'out_float = A[x]+B[x];'+
+			                            '}';
+			    var kernel_add = webCLGL.createKernel(kernel_add_source);
+					*/
+
+					var kernel_mul_source = 'void main(float* A,' +
+					           												'float* B) {' +
+						   'vec2 tx = get_global_id(0);' +
+						   'vec2 ty = get_global_id(1);' +
+							 'const int wA = ' + N + ';'+
+							 'int wB = ' + N + ';'+
+
+						   // value stores the element
+						   // that is computed by the thread
+						   'float value = 0;' +
+						   'for (int k = 0; k < wA; ++k){'+
+						      'float elementA = A[ty * wA + k];'+
+						      'float elementB = B[k * wB + tx];'+
+						      'value += elementA * elementB;'+
+						   '}'+
+
+						   // Write the matrix to device memory each
+						   // thread writes one element
+						   'out_float[ty * wA + tx] = value;' +
+						 '}';
+
+					var kernel_mul = webCLGL.createKernel(kernel_mul_source);
+
+					var _length = matrix.shape[1];
+					_length = N * N;
+			    var offset = 2; // 0 => (0.0, 1.0); non-zero => (-offset.0, +offset.0)
+					// set webCLGL.createBuffer for more information
+					// https://github.com/stormcolor/webclgl/blob/79f77eb091f50363629c3e4524cb4d8c6dfc7121/WebCLGL.class.js#L208
+			    var buffer_A = webCLGL.createBuffer(_length, "FLOAT", offset);
+			    var buffer_B = webCLGL.createBuffer(_length, "FLOAT", offset);
+			    var buffer_C = webCLGL.createBuffer(_length, "FLOAT", offset);
+					// what does FLOAT4 do?
+					// https://github.com/stormcolor/webclgl/blob/79f77eb091f50363629c3e4524cb4d8c6dfc7121/WebCLGLBuffer.class.js
+			    webCLGL.enqueueWriteBuffer(buffer_A, rep.data);
+			    webCLGL.enqueueWriteBuffer(buffer_B, rep.data);
+
+			    kernel_mul.setKernelArg(0, buffer_A);
+			    kernel_mul.setKernelArg(1, buffer_B);
+			    kernel_mul.compile();
+
+			    webCLGL.enqueueNDRangeKernel(kernel_mul, buffer_C);
+
+
+			    c_gpu = webCLGL.enqueueReadBuffer_Float(buffer_C);
+
+					t1 = new Date().getTime();
+					document.getElementById("gpu_results").innerHTML = c_gpu[0];
+					document.getElementById("gpu_time").innerHTML = (t1 - t0) / 1000;
+
+					var result = new Float32Array(c_gpu);
+
+					/* tertiary example from:
+					 		https://github.com/watmough/webgl-matrix-demo
+							code demo of above:
+							http://watmough.github.io/webgl-matrix-demo/
+
+					 */
+
+					rep.r = rep.shape[0];
+					rep.c = rep.shape[1];
+
+					
+					var equal = allclose(result, dots.data);
+
+					document.getElementById("allclose").innerHTML = equal;
+				} else {
+					results.innerHTML = "Failed";
+				}
+			};
+
+			xhr.send();
+
+		</script>
+	</body>
+</html>

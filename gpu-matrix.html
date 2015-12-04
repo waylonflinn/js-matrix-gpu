@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>GPU Matrix</title>
+		<link rel="stylesheet" href='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css'/>
+		<link rel="stylesheet" href="http://css-spinners.com/css/spinner/hexdots.css" type="text/css">
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/zepto/1.1.6/zepto.min.js"></script>
+		<script src="vectorious-3.0.0.js"></script>
+    <script src="webgl-matrix-demo/gpu_matrix.js"></script>
+		<style>
+			.results{
+				height: 45px;
+			  font-family: monospace;
+				white-space: nowrap;
+				overflow: hidden;
+				text-overflow: ellipsis;
+			}
+			.time {
+				height: 35px;
+			}
+			.preformatted {
+				height: 350px;
+		    font-family: monospace;
+		    white-space: pre;
+			}
+			.alert {
+				display: inline-block;
+				width: 170px;
+    		text-align: center;
+			}
+			#allclose {
+			}
+
+		</style>
+	</head>
+	<body>
+		<div class="container">
+			<div class="jumbotron">
+				<h1 class="">GPU Matrix Benchmark</h1>
+				<p>Compare gpu and js speeds</p>
+			</div>
+		</div>
+		<div class="container">
+			<div class="row col-md-offset-2 col-md-8">
+				<h3>Benchmark</h3>
+				<div id="description">...</div>
+			</div>
+			<div class="row col-md-offset-2 col-md-8">
+				<h3>Results</h3>
+				<div id="precision" class="alert alert-info">...</div>
+				<div id="time" class="alert alert-info">...</div>
+			</div>
+		</div>
+		<div class="container">
+			<div class="row">
+				<div class="col-md-4 col-md-offset-2">
+					<div id="gpu" class="panel panel-default">
+						<div class="panel-heading">gpu</div>
+					  <div class="panel-body results"></div>
+					  <div class="panel-footer time"></div>
+					</div>
+				</div>
+				<div class="col-md-4">
+					<div id="vec" class="panel panel-default">
+						<div class="panel-heading">vectorious</div>
+					  <div class="panel-body results"></div>
+					  <div class="panel-footer time"></div>
+					</div>
+				</div>
+			</div>
+		</div>
+		<script>
+			var xhr,
+			 	matrix,
+				result = [],
+				dots;
+
+			var RTOL=1e-05,
+					ATOL=1e-12; // for 32 bit precision: 1e-06
+
+			var N = 1024,
+					M = 1024;
+
+			$(".results").on('click', function(e){
+					$(".results").toggleClass("preformatted");
+			})
+		  function randomArray(N, M){
+
+		    var data = [];
+
+		    for(var i = 0; i < N; i++){
+		      var row = [];
+		      for(var j = 0; j < M; j++){
+		          row[j] = Math.random() / Math.sqrt(N);
+		      }
+		      data.push(row);
+		    }
+
+		    return data;
+		  }
+
+			/* create a typed array from a 2D javascript array */
+			function fromArray(array, type, tranpose) {
+				var shape = [],
+						data,
+						c;   // number of columns
+
+				if(!tranpose){
+					shape[0] = array.length;
+					shape[1] = array[0].length;
+				} else {
+					shape[1] = array.length;
+					shape[0] = array[0].length;
+				}
+				c = shape[1];
+
+				type = type || Float64Array;
+
+				data = new type(shape[0]*shape[1]);
+
+				for (var ii = 0; ii < shape[0]; ++ii)
+					for (var jj = 0; jj < shape[1]; ++jj)
+					if(!tranpose)
+						data[ii*c + jj] = array[ii][jj];
+					else
+						data[ii*c + jj] = array[jj][ii];
+
+				return {"data": data, "shape": shape};
+			};
+
+
+			function getContainerString(container){
+				var typeString = Object.prototype.toString.call(container);
+			 	return typeString.substring(8, typeString.length - 1);
+			}
+			/* from numpy.allclose */
+			function allclose(a, b){
+
+						if(a.length != b.length){
+							console.log("lengths not equal: " + a.length + ", " + b.length);
+							return false;
+						}
+
+						var relative_error,
+								max_relative_error = 0;
+						for(var i = 0; i < a.length; i++){
+
+							relative_error = Math.abs(a[i] - b[i]) / Math.abs(b[i]);
+							if(relative_error > max_relative_error)
+								max_relative_error = relative_error;
+
+							if(relative_error > RTOL && relative_error > ATOL){
+								console.log(Math.abs(a[i] - b[i]));
+								return max_relative_error;
+							}
+						}
+						return max_relative_error;
+			}
+
+		  var data = randomArray(N, M);
+
+
+			xhr = new XMLHttpRequest();
+
+			// download data
+			xhr.open('GET', './data/csv/hours/items.json', true);
+			// replace with ArrayBuffer?
+			// hr.responseType = 'arraybuffer';
+			// http://www.html5rocks.com/en/tutorials/file/xhr2/
+
+			/* Web Workers
+				https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
+
+				faster data moves with Transferable objects
+			 https://developers.google.com/web/updates/2011/12/Transferable-Objects-Lightning-Fast
+			 */
+			 // spinner
+			 // http://www.css-spinners.com/spinner/hexdots
+
+			var elapsed = [];
+			var rep;
+			var g_m;
+
+			xhr.onload = function(e){
+				if(this.status == 200){
+
+					var json,
+						t0, t1;
+
+					json = JSON.parse(this.response)
+
+					rep = fromArray(data, Float32Array);
+					rep_t = fromArray(data, Float32Array, true);
+					var typeString = getContainerString(rep.data);
+					$("#description").html("multiplying "+ rep.shape[0] + " x "+ rep.shape[1] + " matrix (" + typeString + ")");
+
+					/* gpu example from:
+					 		https://github.com/watmough/webgl-matrix-demo
+							code demo of above:
+							http://watmough.github.io/webgl-matrix-demo/
+
+					 */
+
+					t0 = new Date().getTime();
+
+					g_m = gpu_matrix.create(rep.shape[0], rep.shape[1], rep.data);
+					var g_m2 = gpu_matrix.create(rep_t.shape[0], rep_t.shape[1], rep_t.data);
+
+
+					var result = g_m.multiply(g_m2);
+
+					t1 = new Date().getTime();
+
+					elapsed.push((t1 - t0) / 1000);
+					$("#gpu .results").append(result.data.slice(0, 15).join(',\n'));
+					$("#gpu .time").append(elapsed[elapsed.length - 1] + " seconds");
+
+					setTimeout(function(){
+						// vectorious
+						matrix = new vectorious.Matrix(rep.data, {"shape" : rep.shape});
+
+						mT = matrix.transpose();
+
+						t0 = new Date().getTime();
+						dots = matrix.multiply(mT);
+
+						t1 = new Date().getTime();
+
+
+						elapsed.push((t1 - t0) / 1000);
+						//$("#vec .results").removeClass("hexdots-loader");
+						$("#vec .results").html(dots.data.slice(0, 15).join(',\n'));
+						$("#vec .time").append(elapsed[elapsed.length - 1] + " seconds");
+
+
+						var relative_error = allclose(result.data, dots.data);
+						var result_text;
+						if(relative_error < RTOL){
+							$("#precision").addClass("alert-success");
+						}
+						else {
+							$("#precision").addClass("alert-danger");
+						}
+
+						$("#precision").removeClass("alert-info");
+						$("#precision").html(Math.floor(Math.log10(1/relative_error)) + " digits of precision");
+
+						var speedup = elapsed[1] / elapsed[0];
+						if(speedup > 1.2){
+								$("#time").addClass("alert-success");
+
+								$("#time").removeClass("alert-info");
+
+						}
+						else if(speedup < 0.8){
+								$("#time").addClass("alert-danger");
+
+								$("#time").removeClass("alert-info");
+						}
+
+
+						$("#time").html( (elapsed[1] / elapsed[0]).toFixed(1) + "x speedup");
+
+					}, 0);
+
+				} else {
+					results.innerHTML = "Failed";
+				}
+			};
+
+			xhr.send();
+
+		</script>
+		<canvas id="matrixglcanvas" width="128" height="128"></canvas>
+	</body>
+</html>
