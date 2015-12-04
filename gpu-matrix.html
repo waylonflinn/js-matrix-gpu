@@ -257,7 +257,11 @@
 			t1 = new Date().getTime();
 
 			elapsed.push((t1 - t0) / 1000);
-			$("#gpu .results").html(result.data.subarray(0, 15).join(',\n'));
+			var resultString = "";
+			for(var i = 0; i < 15; i++){
+				resultString += result.data[i] + ",\n";
+			}
+			$("#gpu .results").html(resultString);
 			$("#gpu .time").html(elapsed[elapsed.length - 1] + " seconds");
 
 			setTimeout(function(){
@@ -274,7 +278,11 @@
 
 				elapsed.push((t1 - t0) / 1000);
 				//$("#vec .results").removeClass("hexdots-loader");
-				$("#vec .results").html(dots.data.subarray(0, 15).join(',\n'));
+				var resultString = "";
+				for(var i = 0; i < 15; i++){
+					resultString += dots.data[i] + ",\n";
+				}
+				$("#vec .results").html(resultString);
 				$("#vec .time").html(elapsed[elapsed.length - 1] + " seconds");
 
 
