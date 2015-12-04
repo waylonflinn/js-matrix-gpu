@@ -3,7 +3,6 @@
 	<head>
 		<title>GPU Matrix</title>
 		<link rel="stylesheet" href='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css'/>
-		<link rel="stylesheet" href="http://css-spinners.com/css/spinner/hexdots.css" type="text/css">
 		<script src="https://cdnjs.cloudflare.com/ajax/libs/zepto/1.1.6/zepto.min.js"></script>
 		<script src="vectorious-3.0.0.js"></script>
     <script src="webgl-matrix-demo/gpu_matrix.js"></script>
@@ -30,6 +29,9 @@
 			}
 			#allclose {
 			}
+			#run{
+				float: right;
+			}
 
 		</style>
 	</head>
@@ -49,6 +51,7 @@
 				<h3>Results</h3>
 				<div id="precision" class="alert alert-info">...</div>
 				<div id="time" class="alert alert-info">...</div>
+				<div id="run" class="btn btn-default">Run Benchmark <span class="glyphicon glyphicon-refresh"></span></div>
 			</div>
 		</div>
 		<div class="container">
@@ -77,29 +80,56 @@
 				dots;
 
 			var RTOL=1e-05,
-					ATOL=1e-12; // for 32 bit precision: 1e-06
+				ATOL=1e-12; // for 32 bit precision: 1e-06
 
 			var N = 1024,
-					M = 1024;
+				M = 1024;
 
 			$(".results").on('click', function(e){
 					$(".results").toggleClass("preformatted");
 			});
+			$("#run").on('click', function(e){
+				var $self = $(this);
 
-		  function randomArray(N, M){
+				$self.addClass(".disabled");
 
-		    var data = [];
+				$("#precision").removeClass().addClass("alert alert-info");
+				$("#precision").html("...");
+				$("#time").removeClass().addClass("alert alert-info");
+				$("#time").html("...");
 
-		    for(var i = 0; i < N; i++){
-		      var row = [];
-		      for(var j = 0; j < M; j++){
-		          row[j] = Math.random() / Math.sqrt(N);
-		      }
-		      data.push(row);
-		    }
+				$("#gpu .results").html("");
+				$("#gpu .time").html("");
 
-		    return data;
-		  }
+				$("#vec .results").html("");
+				$("#vec .time").html("");
+
+				setTimeout(function(){
+					runBenchmark(N, M, function(){
+						$self.removeClass(".disabled");
+					});
+
+				}, 500);
+
+
+			});
+
+			$("#run").click();
+
+			function randomArray(N, M){
+
+				var data = [];
+
+				for(var i = 0; i < N; i++){
+					var row = [];
+					for(var j = 0; j < M; j++){
+						row[j] = Math.random() / Math.sqrt(N);
+					}
+					data.push(row);
+				}
+
+				return data;
+			}
 
 			/* create a typed array from a 2D javascript array */
 			function fromArray(array, type, tranpose) {
@@ -135,6 +165,7 @@
 				var typeString = Object.prototype.toString.call(container);
 			 	return typeString.substring(8, typeString.length - 1);
 			}
+
 			/* from numpy.allclose */
 			function allclose(a, b){
 
@@ -159,10 +190,10 @@
 						return max_relative_error;
 			}
 
-		  var data = randomArray(N, M);
 
+		function runBenchmark(N, M, callback){
 
-
+			var data = randomArray(N, M);
 
 			/* Web Workers
 				https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
@@ -226,8 +257,8 @@
 			t1 = new Date().getTime();
 
 			elapsed.push((t1 - t0) / 1000);
-			$("#gpu .results").append(result.data.slice(0, 15).join(',\n'));
-			$("#gpu .time").append(elapsed[elapsed.length - 1] + " seconds");
+			$("#gpu .results").html(result.data.slice(0, 15).join(',\n'));
+			$("#gpu .time").html(elapsed[elapsed.length - 1] + " seconds");
 
 			setTimeout(function(){
 				// vectorious
@@ -244,7 +275,7 @@
 				elapsed.push((t1 - t0) / 1000);
 				//$("#vec .results").removeClass("hexdots-loader");
 				$("#vec .results").html(dots.data.slice(0, 15).join(',\n'));
-				$("#vec .time").append(elapsed[elapsed.length - 1] + " seconds");
+				$("#vec .time").html(elapsed[elapsed.length - 1] + " seconds");
 
 
 				var relative_error = allclose(result.data, dots.data);
@@ -275,7 +306,9 @@
 
 				$("#time").html( (elapsed[1] / elapsed[0]).toFixed(1) + "x speedup");
 
+				callback();
 			}, 0);
+		}
 
 
 
