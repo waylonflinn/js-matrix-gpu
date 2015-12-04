@@ -215,11 +215,11 @@
 
 			 */
 
-			t0 = new Date().getTime();
 
 			g_m = gpu_matrix.create(rep.shape[0], rep.shape[1], rep.data);
 			var g_m2 = gpu_matrix.create(rep_t.shape[0], rep_t.shape[1], rep_t.data);
 
+			t0 = new Date().getTime();
 
 			var result = g_m.multiply(g_m2);
 
