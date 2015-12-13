@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>GPU Matrix</title>
+
+		<link rel="stylesheet" href='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css'/>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/zepto/1.1.6/zepto.min.js"></script>
+		<script src="vectorious-3.0.0.js"></script>
+		<script type="text/javascript" src="weblas/dist/weblas.js"></script>
+		<script>
+		// First, checks if it isn't implemented yet.
+		if (!String.prototype.format) {
+		  String.prototype.format = function() {
+		    var args = arguments;
+		    return this.replace(/{(\d+)}/g, function(match, number) {
+		      return typeof args[number] != 'undefined'
+		        ? args[number]
+		        : match
+		      ;
+		    });
+		  };
+		}
+		</script>
+		<style>
+			.results{
+				height: 45px;
+			  font-family: monospace;
+				white-space: nowrap;
+				overflow: hidden;
+				text-overflow: ellipsis;
+			}
+			.time {
+				height: 35px;
+			}
+			.preformatted {
+				height: 350px;
+		    font-family: monospace;
+		    white-space: pre;
+			}
+			.alert {
+				display: inline-block;
+				width: 170px;
+    		text-align: center;
+			}
+			#allclose {
+			}
+			#run{
+				float: right;
+			}
+
+		</style>
+	</head>
+	<body>
+		<div class="container">
+			<div class="jumbotron">
+				<h1 class="">GPU Matrix Benchmark</h1>
+				<p>Compare gpu and js speeds</p>
+			</div>
+		</div>
+		<div class="container">
+			<div class="row col-md-offset-2 col-md-8">
+				<h3>Benchmark</h3>
+				<div id="description">...</div>
+			</div>
+			<div class="row col-md-offset-2 col-md-8">
+				<h3>Results</h3>
+				<div id="precision" class="alert alert-info">...</div>
+				<div id="time" class="alert alert-info">...</div>
+				<div id="run" class="btn btn-default">Run Benchmark <span class="glyphicon glyphicon-refresh"></span></div>
+			</div>
+		</div>
+		<div class="container">
+			<div class="row">
+				<div class="col-md-4 col-md-offset-2">
+					<div id="gpu" class="panel panel-default">
+						<div class="panel-heading">gpu</div>
+					  <div class="panel-body results"></div>
+					  <div class="panel-footer time"></div>
+					</div>
+				</div>
+				<div class="col-md-4">
+					<div id="vec" class="panel panel-default">
+						<div class="panel-heading">vectorious</div>
+					  <div class="panel-body results"></div>
+					  <div class="panel-footer time"></div>
+					</div>
+				</div>
+			</div>
+		</div>
+		<script>
+
+			var xhr,
+			 	matrix,
+				result = [],
+				dots;
+
+			var gl = new weblas.WebGL(),
+				gemm = new weblas.GEMMFloatCalculator(gl);
+
+			var RTOL=1e-05,
+				ATOL=1e-12; // for 32 bit precision: 1e-06
+
+			var N = 1024,
+				M = 1024;
+
+			$(".results").on('click', function(e){
+					$(".results").toggleClass("preformatted");
+			});
+			$("#run").on('click', function(e){
+				var $self = $(this);
+
+				$self.addClass(".disabled");
+
+				$("#precision").removeClass().addClass("alert alert-info");
+				$("#precision").html("...");
+				$("#time").removeClass().addClass("alert alert-info");
+				$("#time").html("...");
+
+				$("#gpu .results").html("");
+				$("#gpu .time").html("");
+
+				$("#vec .results").html("");
+				$("#vec .time").html("");
+
+				setTimeout(function(){
+					runBenchmark(N, M, function(){
+						$self.removeClass(".disabled");
+					});
+
+				}, 500);
+
+
+			});
+
+			$("#run").click();
+
+			function randomArray(N, M){
+
+				var data = [];
+
+				for(var i = 0; i < N; i++){
+					var row = [];
+					for(var j = 0; j < M; j++){
+						row[j] = Math.random() / Math.sqrt(N);
+					}
+					data.push(row);
+				}
+
+				return data;
+			}
+
+			/* create a typed array from a 2D javascript array */
+			function fromArray(array, type, tranpose) {
+				var shape = [],
+						data,
+						c;   // number of columns
+
+				if(!tranpose){
+					shape[0] = array.length;
+					shape[1] = array[0].length;
+				} else {
+					shape[1] = array.length;
+					shape[0] = array[0].length;
+				}
+				c = shape[1];
+
+				type = type || Float64Array;
+
+				data = new type(shape[0]*shape[1]);
+
+				for (var ii = 0; ii < shape[0]; ++ii)
+					for (var jj = 0; jj < shape[1]; ++jj)
+					if(!tranpose)
+						data[ii*c + jj] = array[ii][jj];
+					else
+						data[ii*c + jj] = array[jj][ii];
+
+				return {"data": data, "shape": shape};
+			};
+
+
+			function getContainerString(container){
+				var typeString = Object.prototype.toString.call(container);
+			 	return typeString.substring(8, typeString.length - 1);
+			}
+
+			/* from numpy.allclose */
+			function allclose(a, b){
+
+				if(a.length != b.length){
+					console.log("lengths not equal: " + a.length + ", " + b.length);
+					return false;
+				}
+
+				var relative_error,
+					max_relative_error = 0,
+					err_count = 0;
+
+				for(var i = 0; i < a.length; i++){
+
+					relative_error = Math.abs(a[i] - b[i]) / Math.abs(b[i]);
+					if(relative_error > max_relative_error)
+						max_relative_error = relative_error;
+
+					if(relative_error > RTOL && relative_error > ATOL){
+						console.log("index: {0}, coord: ({1}, {2}), b: {3}, delta: {4}".format(i, (i / N | 0), (i % N), b[i],  Math.abs(a[i] - b[i]) ));
+						err_count++;
+
+						if(err_count > 10)
+							return max_relative_error;
+					}
+				}
+				return max_relative_error;
+			}
+
+
+		function runBenchmark(N, M, callback){
+
+			var d1 = randomArray(N, M),
+				d2 = randomArray(M, N);
+
+			/* Web Workers
+				https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
+
+				faster data moves with Transferable objects
+			 https://developers.google.com/web/updates/2011/12/Transferable-Objects-Lightning-Fast
+			 */
+			 // spinner
+			 // http://www.css-spinners.com/spinner/hexdots
+
+			var elapsed = [];
+			var rep;
+
+			/*
+			xhr = new XMLHttpRequest();
+
+			// replace with ArrayBuffer?
+			// hr.responseType = 'arraybuffer';
+			// http://www.html5rocks.com/en/tutorials/file/xhr2/
+			// download data
+
+			xhr.open('GET', './data/csv/hours/items.json', true);
+
+			xhr.onload = function(e){
+				if(this.status == 200){
+
+					var json,
+						t0, t1;
+
+					json = JSON.parse(this.response);
+
+				} else {
+					results.innerHTML = "Failed";
+				}
+			};
+
+			xhr.send();
+			*/
+
+			rep = fromArray(d1, Float32Array);
+			rep_t = fromArray(d1, Float32Array, true);
+			var typeString = getContainerString(rep.data);
+			$("#description").html("multiplying "+ rep.shape[0] + " x "+ rep.shape[1] + " matrix (" + typeString + ")");
+
+			var h1 = rep.shape[0]; //outputChannels;
+			var h2 = rep_t.shape[0]; //inputDims._dims[0];
+			var w1 = rep.shape[1]; //inputDims._dims[1];
+			var w2 = rep_t.shape[1];
+			var alpha = 1.0;
+			var beta = 0.0;
+			var A = rep.data;
+			var B = rep_t.data;
+			var C = {};
+
+
+
+			t0 = new Date().getTime();
+
+		    result = gemm.calculate(h1, w2, h2, alpha, A, B, beta, C);
+
+			t1 = new Date().getTime();
+
+
+			elapsed.push((t1 - t0) / 1000);
+			var resultString = "";
+			for(var i = 0; i < 15; i++){
+				resultString += result[i] + ",\n";
+			}
+			$("#gpu .results").html(resultString);
+			$("#gpu .time").html(elapsed[elapsed.length - 1] + " seconds");
+
+			setTimeout(function(){
+				// vectorious
+				matrix = new vectorious.Matrix(rep.data, {"shape" : rep.shape});
+				m2 = new vectorious.Matrix(rep_t.data, {"shape" : rep_t.shape});
+
+				//mT = matrix.transpose();
+
+				t0 = new Date().getTime();
+				dots = matrix.multiply(m2);
+
+				t1 = new Date().getTime();
+
+
+				elapsed.push((t1 - t0) / 1000);
+				//$("#vec .results").removeClass("hexdots-loader");
+				var resultString = "";
+				for(var i = 0; i < 15; i++){
+					resultString += dots.data[i] + ",\n";
+				}
+				$("#vec .results").html(resultString);
+				$("#vec .time").html(elapsed[elapsed.length - 1] + " seconds");
+
+
+				var relative_error = allclose(result, dots.data);
+				var result_text;
+				if(relative_error < RTOL){
+					$("#precision").addClass("alert-success");
+				}
+				else {
+					$("#precision").addClass("alert-danger");
+				}
+
+				$("#precision").removeClass("alert-info");
+				$("#precision").html(Math.floor(Math.log10(1/relative_error)) + " digits of precision");
+
+				var speedup = elapsed[1] / elapsed[0];
+				if(speedup > 1.2){
+						$("#time").addClass("alert-success");
+
+						$("#time").removeClass("alert-info");
+
+				}
+				else if(speedup < 0.8){
+						$("#time").addClass("alert-danger");
+
+						$("#time").removeClass("alert-info");
+				}
+
+
+				$("#time").html( (elapsed[1] / elapsed[0]).toFixed(1) + "x speedup");
+
+				callback();
+			}, 0);
+		}
+
+
+
+		</script>
+	</body>
+</html>
